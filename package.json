@@ -1,0 +1,26 @@
+{
+  "name": "ytsurfserver",
+  "version": "1.0.0",
+  "description": "Youtube surfing app server",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "Youtube",
+    "Angular",
+    "Node.js"
+  ],
+  "author": "Farkhod Alimov",
+  "license": "ISC",
+  "dependencies": {
+    "@types/express": "^4.16.0",
+    "@types/node": "^10.12.18",
+    "body-parser": "^1.18.3",
+    "express": "^4.16.4",
+    "google-auth-library": "^2.0.2",
+    "googleapis": "^36.0.0",
+    "method-override": "^3.0.0",
+    "mongoose": "^5.4.0"
+  }
+}
