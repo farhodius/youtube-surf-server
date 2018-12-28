@@ -4,7 +4,9 @@ import { Youtube } from './services/Youtube';
 import { ResourceModel } from './services/dbmodels/ResourceModel';
 import bodyParser = require('body-parser');
 import mongoose = require('mongoose');
-import { runInNewContext } from 'vm';
+import { Resource } from './interfaces/resources/Resource';
+import { YoutubeResourceType } from './common/enums/YoutubeResourceType';
+import { youtube } from 'googleapis/build/src/apis/youtube';
 
 // Connect to the DB
 mongoose.connect('mongodb://localhost/ytsurfer');
@@ -37,26 +39,30 @@ app.get('/', (req, res) => {
   res.send('Hello');
 });
 
+/**
+ * Search all resource types videos, playlists, channels
+ */
 app.get('/api/v1/search/:type', (req, res, next) => {
   const yt = new Youtube();
   const props = { type: req.params.type, query: req.query.q, limit: req.query.limit };
   yt.search(
     props,
-    (results) => {
-      res.send(results);
-      // async function checkSaved() {
-      //   for (const r of results.videos) {
-      //     await ResourceModel.findOne({id: r.id}, (error, info) => {
-      //       console.log('Resource info: ', info);
-      //       if (info !== null) {
-      //         r.saved = true;
-      //       }
-      //     });
-      //   }
-      //   console.log('Sending results');
-      //   res.send(results);
-      // }
-      // checkSaved();
+    (rawResults) => {
+      const results: Resource[] = [];
+      rawResults.forEach((r) => {
+        if (r.id.kind === 'youtube#video') {
+          results.push(yt.parseVideoResource(r));
+        } else if (r.id.kind === 'youtube#playlist') {
+          results.push(yt.parsePlaylistResource(r));
+        } else if (r.id.kind === 'youtube#channel') {
+          results.push(yt.parseChannelResource(r));
+        }
+      });
+
+      // Find and flag as saved resources that are already in the DB
+      yt.flagSavedResources(results).then((resources) => {
+        res.send(resources);
+      });
     },
     (error) => {
       console.log(error);
@@ -65,7 +71,62 @@ app.get('/api/v1/search/:type', (req, res, next) => {
   );
 });
 
-app.post('/api/v1/video', (req, res, next) => {
+/**
+ * Get all resources saved in the DB
+ */
+app.get('/api/v1/resource', (req, res, next) => {
+  // Set find query conditions and options
+  const conditions: any = {};
+  const options: any = {};
+  const resourceType: string = req.query.type.toLowerCase();
+  const limit: number = parseInt(req.query.limit);
+  if (YoutubeResourceType[resourceType] === resourceType) {
+    conditions.type = resourceType;
+  }
+  if (!isNaN(limit) && limit > 0) {
+    options.limit = limit;
+  }
+  // Get saved resources
+
+  ResourceModel.find(conditions, null, options, async (error, results) => {
+    if (error) {
+      next(error);
+    } else {
+      // Get details from Youtube API
+      const yt: Youtube = new Youtube();
+      const output: Resource[] = [];
+      try {
+        let resource: Resource;
+        for (const r of results) {
+          if (r.type === YoutubeResourceType.video) {
+            const ytres = await yt.getVideoResourceDetails(r.id, limit);
+            resource = yt.parseVideoResource(ytres);
+          } else if (r.type === YoutubeResourceType.playlist) {
+            const ytres = await yt.getPlaylistResourceDetails(r.id, limit);
+            resource = yt.parsePlaylistResource(ytres);
+          } else if (r.type === YoutubeResourceType.channel) {
+            const ytres = await yt.getChannelResourceDetails(r.id, limit);
+            resource = yt.parseChannelResource(ytres);
+          } else {
+            continue;
+          }
+          resource.saved = true;
+          output.push(resource);
+        }
+      } catch (error) {
+        next(error);
+        return;
+      }
+
+      res.send(output);
+    }
+  });
+});
+
+/**
+ * Save resource to the DB
+ */
+app.post('/api/v1/resource', (req, res, next) => {
   const data = req.body;
   const resource = new ResourceModel({
     id: data.id,
@@ -80,7 +141,10 @@ app.post('/api/v1/video', (req, res, next) => {
   });
 });
 
-app.delete('/api/v1/video/:id', (req, res, next) => {
+/**
+ * Delete resource from the DB
+ */
+app.delete('/api/v1/resource/:id', (req, res, next) => {
   ResourceModel.findOneAndDelete({ id: req.params.id }, (error, resource) => {
     if (error) {
       next(error);
